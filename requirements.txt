@@ -2,10 +2,12 @@ PyQt6 == 6.10.2
 numpy == 2.4.1
 pydub == 0.25.1
 audioop-lts == 0.2.2
-torch == 2.9.1+cu126
-torchvision == 0.24.1+cu126
-torchaudio == 2.9.1+cu126
 kornia == 0.8.2
 einops == 0.8.1
 PyOpenGL == 3.1.10
 ./libs/spoutgl-0.1.1-cp314-cp314-win_amd64.whl
+
+--extra-index-url https://download.pytorch.org/whl/cu126
+torch == 2.9.1+cu126
+torchvision == 0.24.1+cu126
+torchaudio == 2.9.1+cu126
