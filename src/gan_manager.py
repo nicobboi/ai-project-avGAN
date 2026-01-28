@@ -1,19 +1,26 @@
 import os
+import sys
 import torch
+import pickle
 import numpy as np
-from utils.lightweight_gan_cust import Generator
 import utils.logutils as log
 
+# IMPORTANTE: Se il pickle richiede moduli specifici di StyleGAN (es. dnnlib),
+# assicurati che la cartella stylegan3 sia nel path.
+# Se la cartella stylegan3 è nella root del progetto, scommenta la riga sotto:
+# sys.path.insert(0, "./stylegan3")
 
 class GANManager:
-    # Aggiungiamo il parametro use_gpu=True come default
-    def __init__(self, model_path, image_size=256, latent_dim=256, use_gpu=True, eval_mode=True):
+    def __init__(self, model_path, latent_dim=512, use_gpu=True, eval_mode=True):
+        """
+        Nota: image_size in StyleGAN3 è definito nel modello stesso, quindi il parametro 
+        passato qui potrebbe essere ignorato a favore di G.img_resolution.
+        """
         self.model_path = model_path
-        self.image_size = image_size
-        self.latent_dim = latent_dim
+        # StyleGAN3 di solito usa 512, ma lo leggeremo dinamicamente dal modello
+        self.latent_dim = latent_dim 
         
         # LOGICA DI SELEZIONE DEVICE
-        # Usa CUDA solo se l'utente lo vuole E se è disponibile
         if use_gpu and torch.cuda.is_available():
             self.device = torch.device('cuda')
             log.info("GAN Manager: Modalità GPU (CUDA) attivata.")
@@ -25,7 +32,17 @@ class GANManager:
                 log.info("GAN Manager: Modalità CPU forzata.")
 
         # Carica il modello
-        self.model = self._load_model(eval_mode=eval_mode)
+        self.model = self._load_model()
+
+        # Aggiorniamo le dimensioni in base al modello caricato
+        if hasattr(self.model, 'z_dim'):
+            self.latent_dim = self.model.z_dim
+        
+        # Gestione Classi (c) per StyleGAN
+        # Se il modello non è condizionato, c rimane None
+        self.c = None
+        if hasattr(self.model, 'c_dim') and self.model.c_dim > 0:
+            self.c = torch.zeros([1, self.model.c_dim]).to(self.device)
 
         # Posizione attuale nello spazio (da dove generiamo l'immagine)
         self.current_z = torch.randn(1, self.latent_dim).to(self.device)
@@ -33,54 +50,38 @@ class GANManager:
         self.target_z = torch.randn(1, self.latent_dim).to(self.device)
 
     def _load_model(self, eval_mode=True):
-        # ... (Il resto del codice rimane uguale, userà self.device automaticamente) ...
-        # Copia pure il metodo _load_model e generate_image dal messaggio precedente
-        # Assicurati solo che _load_model usi self.device come faceva prima
-        log.info("Caricamento modello in corso...")
-        
-        model = Generator(
-            image_size=self.image_size, 
-            latent_dim=self.latent_dim
-        )
+        log.info(f"Caricamento modello StyleGAN3 da: {self.model_path}...")
 
         if not os.path.exists(self.model_path):
             raise FileExistsError(f"Il file del modello non esiste: {self.model_path}")
-            
 
         try:
-            checkpoint = torch.load(self.model_path, map_location=self.device, weights_only=False)
-            gan_weights = checkpoint['GAN']
-
-            gen_weights = {}
-            found_ema = False
+            with open(self.model_path, 'rb') as f:
+                # Carichiamo il dizionario del network
+                network_dict = pickle.load(f)
+                
+                # Solitamente 'G_ema' è il generatore migliore per inferenza
+                if 'G_ema' in network_dict:
+                    G = network_dict['G_ema']
+                    log.info("Trovato generatore G_ema (Exponential Moving Average).")
+                else:
+                    G = network_dict['G']
+                    log.warning("G_ema non trovato, uso generatore base G.")
+                
+                G.to(self.device)
+                
+                # StyleGAN3 è quasi sempre in eval mode per generazione
+                G.eval() 
             
-            for k, v in gan_weights.items():
-                if k.startswith('GE.'):
-                    gen_weights[k.replace('GE.', '')] = v
-                    found_ema = True
-            
-            if not found_ema:
-                log.warning("Pesi EMA non trovati, uso pesi Base (G)...")
-                for k, v in gan_weights.items():
-                    if k.startswith('G.') and not k.startswith('GE.') and 'scaler' not in k:
-                        gen_weights[k.replace('G.', '')] = v
-            else:
-                log.info("Pesi EMA (GE) trovati e caricati.")
+            log.success(f"✅ Modello StyleGAN3 caricato! Risoluzione: {G.img_resolution}x{G.img_resolution}")
+            return G
 
-            model.load_state_dict(gen_weights, strict=False)
-            model.to(self.device)
-
-            if eval_mode:
-                model.eval()
-            else:
-                model.train() 
-            
-            log.success("✅ Modello caricato e pronto!")
-            return model
-
+        except ModuleNotFoundError as e:
+            log.error(f"❌ Errore moduli mancanti: {e}. Assicurati che 'dnnlib' e 'torch_utils' siano visibili a Python.")
+            return None
         except Exception as e:
             log.error(f"❌ Errore critico nel caricamento: {e}")
-            return model
+            return None
 
     def generate_image(self, audio_chunk) -> np.uint8:
         if self.model is None or len(audio_chunk) == 0:
@@ -92,41 +93,42 @@ class GANManager:
             volume = np.linalg.norm(audio_chunk) / np.sqrt(len(audio_chunk))
             
             # 2. LOGICA DI NAVIGAZIONE (LATENT WALK)
-            # La velocità di movimento dipende dal volume.
-            # - base_speed: velocità minima anche in silenzio (morphing lento continuo)
-            # - dynamic_speed: picco di velocità dato dalla musica
             base_speed = 0.005 
-            dynamic_speed = min(volume * 0.1, 0.5) # Limita il passo massimo
+            dynamic_speed = min(volume * 0.1, 0.5) 
             step = base_speed + dynamic_speed
 
-            # Interpolazione lineare (Lerp) dal punto attuale verso il target
+            # Interpolazione lineare (Lerp)
             self.current_z = (1 - step) * self.current_z + step * self.target_z
 
-            # 3. GESTIONE TARGET (Cambio di direzione)
-            # Se siamo arrivati vicini al target, ne scegliamo uno nuovo a caso
+            # 3. GESTIONE TARGET
             distance_to_target = torch.norm(self.target_z - self.current_z)
             if distance_to_target < 0.2:
                 self.target_z = torch.randn(1, self.latent_dim).to(self.device)
 
-            # 4. GESTIONE IMPULSI (Opzionale per effetto "Kick/Cassa")
-            # Se c'è un forte picco audio, aggiungiamo un rumore istantaneo
-            # che deforma l'immagine sul colpo di batteria
+            # 4. GESTIONE IMPULSI ("Kick")
             if volume > 0.5:
                 kick_impact = torch.randn(1, self.latent_dim).to(self.device) * volume * 0.2
                 self.current_z += kick_impact
 
-            # Normalizzazione (Best practice per non far degradare l'immagine delle GAN nel tempo)
-            self.current_z = self.current_z / self.current_z.norm() * np.sqrt(self.latent_dim)
+            # Normalizzazione sferica (Importante per StyleGAN)
+            # StyleGAN si aspetta input normalizzati su una ipersfera
+            self.current_z = self.current_z / self.current_z.norm() * np.sqrt(self.latent_dim) # Opzionale su SG3, ma spesso aiuta la stabilità nelle animazioni
 
             # 5. GENERAZIONE DELL'IMMAGINE
-            generated_tensor = self.model(self.current_z)
+            # StyleGAN3 call: G(z, c, ...)
+            # noise_mode='const' evita lo "sfarfallio" della grana pellicola tra i frame
+            img = self.model(self.current_z, self.c, force_fp32=True, noise_mode='const')
 
-            # --- Formattazione Output (Rimane identica) ---
-            if torch.isnan(generated_tensor).any():
-                generated_tensor = torch.nan_to_num(generated_tensor, nan=0.0)
-
-            img_data = (generated_tensor.clamp(-1, 1) + 1) / 2
-            img_data = (img_data * 255).byte()
-            final_image = img_data[0].permute(1, 2, 0).cpu().numpy()
+            # --- Formattazione Output ---
+            # Output è [1, 3, H, W] in range [-1, 1]
+            
+            # 1. Permute da (N, C, H, W) a (N, H, W, C)
+            img = img.permute(0, 2, 3, 1)
+            
+            # 2. Scaling da [-1, 1] a [0, 255]
+            img = (img * 127.5 + 128).clamp(0, 255).to(torch.uint8)
+            
+            # 3. Estrazione array numpy per display/salvataggio
+            final_image = img[0].cpu().numpy()
             
             return final_image

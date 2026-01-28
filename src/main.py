@@ -41,8 +41,7 @@ class VisualizerApp:
         self.window = GUI(self.audio_system, img_size=256)
 
         self.gan_manager = GANManager(
-            model_path=MODEL_PATH, 
-            image_size=256, 
+            model_path=MODEL_PATH,
             latent_dim=256,
             use_gpu=USE_GPU,
             eval_mode=EVAL_MODE
