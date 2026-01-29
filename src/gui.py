@@ -32,6 +32,11 @@ class GUI(QWidget):
         layout = QVBoxLayout()
         layout.setContentsMargins(30, 30, 30, 30)
 
+        self.lbl_fps = QLabel("FPS: -- / --")
+        self.lbl_fps.setStyleSheet("color: #888; font-size: 10pt;") 
+        self.lbl_fps.setAlignment(Qt.AlignmentFlag.AlignRight)
+        layout.addWidget(self.lbl_fps)
+
         # Info file
         self.lbl_title = QLabel("Seleziona un file audio...")
         self.lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -144,6 +149,19 @@ class GUI(QWidget):
         self.audio.stop()
         self.btn_play.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
         self.slider.setValue(0)
+
+    # --- Logica FPS ---
+
+    def update_fps_label(self, actual_fps, target_fps):
+        """Aggiorna la label degli FPS con colori condizionali"""
+        
+        # Colora di rosso se le performance calano troppo (sotto l'80% del target)
+        color = "#eee"
+        if target_fps > 0 and actual_fps < (target_fps * 0.8):
+            color = "#ff5555"
+            
+        self.lbl_fps.setStyleSheet(f"color: {color}; font-size: 10pt; font-weight: bold;")
+        self.lbl_fps.setText(f"FPS: {actual_fps} / {target_fps}")
 
     # --- Logica Slider e Tempo ---
 
