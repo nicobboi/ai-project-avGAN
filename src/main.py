@@ -49,7 +49,8 @@ class VisualizerApp:
 
         self.mlp_manager = MoodPredictor(
             model_path=MLP_MODEL_PATH,
-            scaler_path=MLP_SCALAR_PATH
+            scaler_path=MLP_SCALAR_PATH,
+            use_gpu=USE_GPU
         )
 
         self.gan_manager = GANManager(

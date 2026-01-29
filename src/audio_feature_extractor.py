@@ -1,7 +1,7 @@
 import numpy as np
 import librosa
 from dataclasses import dataclass
-from utils.logutils import log
+import utils.logutils as log
 
 @dataclass
 class AudioAnalysis:
