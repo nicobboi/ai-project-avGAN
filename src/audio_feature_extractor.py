@@ -1,84 +1,72 @@
 import numpy as np
 import librosa
 from dataclasses import dataclass
-import utils.logutils as log
 
 @dataclass
 class AudioAnalysis:
-    """
-    Contenitore dati per le feature musicali.
-    """
-    loudness_db: float  # Volume in decibel (negativo)
-    danceability: float # Indice di variazione ritmica (0.0 - 10.0+)
-    brightness: float   # Frequenza media (Hz) - 'Colore' del suono
-    energy: float       # RMS medio (0.0 - 1.0)
+    spectral_contrast: float
+    spectral_flatness: float
+    onset_strength: float
+    zero_crossing_rate: float
+    chroma_variance: float
 
 class AudioFeatureExtractor:
-    def __init__(self):
-        # Librosa è stateless, non richiede inizializzazione di algoritmi
-        pass
-
     def process_audio(self, audio_data: np.ndarray, sr: int) -> AudioAnalysis:
-        """
-        Estrae feature musicali usando Librosa.
-        Input: Array numpy float32, Sample Rate.
-        """
-        
-        # 1. Controllo validità dati
         if len(audio_data) == 0:
             return self._get_empty_features()
             
-        # Assicuriamoci che sia float32 per le performance
         y = audio_data.astype(np.float32)
         n_samples = len(y)
-
-        # --- CONFIGURAZIONE DINAMICA FFT ---
-        # Librosa di default usa n_fft=2048. Se il chunk è più piccolo (es. 1024), crasha.
-        # Qui calcoliamo un n_fft che stia sempre dentro l'array.
         
-        # Se i campioni sono meno di 2048, usa tutta la lunghezza disponibile.
-        # Altrimenti usa il classico 2048.
-        n_fft = min(n_samples, 2048)
-        
-        # Hop length: passo di avanzamento. Di standard è n_fft / 4.
-        hop_length = n_fft // 4
-        
-        # Caso limite: se il chunk è minuscolo (es. < 32 sample), impossibile analizzare.
-        if n_fft < 32:
+        # --- 1. FILTRO SILENZIO (Cruciale!) ---
+        # Calcoliamo l'RMS prima di tutto.
+        # Se il chunk è silenzioso (sotto -60dB), le feature spettrali sono spazzatura.
+        rms_val = np.sqrt(np.mean(y**2))
+        if rms_val < 0.005: # Soglia empirica per il silenzio
             return self._get_empty_features()
 
-        # 2. ESTRAZIONE FEATURE
+        # Configurazione FFT sicura
+        n_fft = min(n_samples, 2048)
+        if n_fft < 128: # Troppo piccolo per analizzare frequenze
+            return self._get_empty_features()
+        hop_length = n_fft // 4
+
         try:
-            # "Danceability" (Onset Strength)
-            # Passiamo n_fft e hop_length calcolati dinamicamente
+            # --- SPECTRAL CONTRAST (Migliorato) ---
+            # band=6 crea 7 bande.
+            contrast = librosa.feature.spectral_contrast(y=y, sr=sr, n_fft=n_fft, hop_length=hop_length, n_bands=6)
+            # PRENDIAMO SOLO LE BANDE MEDIE-ALTE
+            # contrast[0] sono i bassi profondi (spesso piatti). 
+            # Facciamo la media da contrast[1] in su per vedere la vera definizione del suono.
+            avg_contrast = float(np.mean(contrast[1:, :]))
+
+            # --- SPECTRAL FLATNESS ---
+            # Aggiungiamo un piccolissimo rumore (amin) per evitare log(0) e valori infiniti
+            flatness = librosa.feature.spectral_flatness(y=y, n_fft=n_fft, hop_length=hop_length, amin=1e-10)
+            avg_flatness = float(np.mean(flatness))
+
+            # --- ALTRE FEATURE ---
             onset_env = librosa.onset.onset_strength(y=y, sr=sr, n_fft=n_fft, hop_length=hop_length)
-            danceability = float(np.std(onset_env))
+            avg_onset = float(np.mean(onset_env))
 
-            # RMS (Energia)
-            # Nota: rms usa il parametro 'frame_length' invece di 'n_fft', ma è lo stesso concetto
-            rms = librosa.feature.rms(y=y, frame_length=n_fft, hop_length=hop_length)
-            avg_energy = float(np.mean(rms))
-            
-            # Loudness in dB
-            loudness_db = float(librosa.amplitude_to_db(np.array([avg_energy]))[0])
+            zcr = librosa.feature.zero_crossing_rate(y, frame_length=n_fft, hop_length=hop_length)
+            avg_zcr = float(np.mean(zcr))
 
-            # Spectral Centroid (Luminosità)
-            cent = librosa.feature.spectral_centroid(y=y, sr=sr, n_fft=n_fft, hop_length=hop_length)
-            avg_brightness = float(np.mean(cent))
+            chroma = librosa.feature.chroma_stft(y=y, sr=sr, n_fft=n_fft, hop_length=hop_length, tuning=0.0)
+            chroma_var = float(np.mean(np.var(chroma, axis=1)))
 
-        except Exception as e:
-            # Se qualcosa fallisce nei calcoli matematici (es. divisione per zero), 
-            # restituisci valori vuoti sicuri
-            log.error(f"Errore calcolo feature: {e}")
+        except Exception:
             return self._get_empty_features()
 
         return AudioAnalysis(
-            loudness_db=round(loudness_db, 2),
-            danceability=round(danceability, 3),
-            brightness=round(avg_brightness, 2),
-            energy=round(avg_energy, 4)
+            spectral_contrast=round(avg_contrast, 2),
+            spectral_flatness=round(avg_flatness, 4),
+            onset_strength=round(avg_onset, 3),
+            zero_crossing_rate=round(avg_zcr, 4),
+            chroma_variance=round(chroma_var, 4)
         )
 
     def _get_empty_features(self):
-        """Restituisce un oggetto vuoto in caso di errore/silenzio"""
-        return AudioAnalysis(-80.0, 0.0, 0.0, 0.0)
+        # Ritorniamo None o valori negativi per indicare "Dato non valido"
+        # Così possiamo filtrarli dopo nel dataset generation
+        return AudioAnalysis(-1.0, -1.0, -1.0, -1.0, -1.0)

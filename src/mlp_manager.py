@@ -6,7 +6,7 @@ import os
 import utils.logutils as log
 
 class MoodLatentMLP(nn.Module):
-    def __init__(self, input_size=4, output_size=512):
+    def __init__(self, input_size=5, output_size=512):
         super(MoodLatentMLP, self).__init__()
         
         self.network = nn.Sequential(
@@ -55,7 +55,7 @@ class MoodPredictor:
             self.scaler = joblib.load(scaler_path)
             
             # Caricamento Modello
-            self.model = MoodLatentMLP(input_size=4, output_size=512)
+            self.model = MoodLatentMLP(input_size=5, output_size=512)
             self.model.load_state_dict(torch.load(model_path, map_location=self.device))
             self.model.to(self.device)
             self.model.eval()
@@ -67,7 +67,7 @@ class MoodPredictor:
             log.error(f"ERRORE durante il caricamento del modello: {e}")
             self.model_loaded = False
 
-    def get_latent_vector(self, loudness: float, danceability: float, brightness: float, energy: float):
+    def get_latent_vector(self, contrast: float, flatness: float, onset: float, zrc: float, chroma_var: float):
         """
         Prende le feature audio grezze, le normalizza e restituisce il vettore latente.
         
@@ -80,7 +80,7 @@ class MoodPredictor:
 
         # Preparazione Input (shape [1, 4])
         # L'input deve essere un array 2D per lo scaler e per PyTorch
-        raw_input = np.array([[loudness, danceability, brightness, energy]], dtype=np.float32)
+        raw_input = np.array([[contrast, flatness, onset, zrc, chroma_var]], dtype=np.float32)
 
         # Normalizzazione (Usando lo scaler appreso nel training)
         try:

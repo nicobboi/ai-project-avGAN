@@ -55,9 +55,21 @@ class VisualizerApp:
 
         self.gan_manager = GANManager(
             model_path=GAN_MODEL_PATH,
-            latent_dim=256,
+            latent_dim=512,
             use_gpu=USE_GPU
         )
+
+        # --- CONNESSIONI RESET ---
+        # 1. Reset automatico al cambio canzone
+        self.audio_system.player.sourceChanged.connect(self.on_gan_reset)
+        
+        # 2. Reset manuale da bottone GUI
+        if hasattr(self.window, 'btn_stop'):
+            self.window.btn_stop.clicked.connect(self.on_gan_reset)
+            log.info("Bottone Reset connesso correttamente.")
+        else:
+            log.warning("Bottone 'btn_stop' non trovato nella GUI. Reset manuale disabilitato.")
+        # -------------------------
 
         self.audio_extractor = AudioFeatureExtractor()
         
@@ -78,6 +90,10 @@ class VisualizerApp:
 
         # Avvia la GUI
         self.window.show()
+
+    def on_gan_reset(self):
+        """Callback chiamata quando cambia la canzone o si preme reset"""
+        self.gan_manager.reset_state()
 
     def update_loop(self):
         # Se il player non è in Play (è in Pausa o Fermo), non generare nulla
@@ -114,14 +130,36 @@ class VisualizerApp:
 
         # Generazione vettore latente con MLP
         latent_vector = self.mlp_manager.get_latent_vector(
-            loudness=audio_feature.loudness_db,
-            danceability=audio_feature.danceability,
-            brightness=audio_feature.brightness,
-            energy=audio_feature.energy
+            contrast=audio_feature.spectral_contrast,
+            flatness=audio_feature.spectral_flatness,
+            onset=audio_feature.onset_strength,
+            zrc=audio_feature.zero_crossing_rate,
+            chroma_var=audio_feature.chroma_variance
         )
 
+        # --- DEBUG LOGGING CONTINUO ---
+        # Leggiamo la distanza dal target (più è alta, più la GAN si sta muovendo veloce)
+        z_dist = self.gan_manager.get_distance_to_target()
+        
+        # Stampiamo sovrascrivendo la riga (\r)
+        # Formattiamo i float a 2 cifre decimali per pulizia
+        sys.stdout.write(
+            f"\r[NORM] C:{audio_feature.spectral_contrast:.2f} \
+                F:{audio_feature.spectral_flatness:.3f} \
+                O:{audio_feature.onset_strength:.2f} \
+                Z:{audio_feature.zero_crossing_rate:.3f} \
+                V:{audio_feature.chroma_variance:.3f} | \
+                [GAN] Move:{z_dist:.3f}   "
+        )
+        sys.stdout.flush()
+        # -----------------------------
+
         # Generazione immagine con GAN
-        final_image = self.gan_manager.generate_image(audio_feature.energy,latent_vector)
+        final_image = self.gan_manager.generate_image(
+            audio_chunk=chunk,
+            features=audio_feature,
+            mlp_latent_vector=latent_vector
+        )
         if final_image is not None:
             self.window.set_image(final_image)
 
