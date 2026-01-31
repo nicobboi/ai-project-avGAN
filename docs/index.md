@@ -60,12 +60,13 @@ Si è valutato l'utilizzo di differenti tipi di reti neurali, ma si è giunti al
 - Technologies and versions used (for reproducibility).
 <br>
 Python 3.12.10
-
+<br>
 (PyTorch)
+<br>
 torch == 2.9.1+cu126
 torchvision == 0.24.1+cu126
 torchaudio == 2.9.1+cu126
-
+<br>
 PyQt6 == 6.10.2
 pydub == 0.25.1
 kornia == 0.8.2
