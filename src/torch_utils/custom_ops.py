@@ -13,10 +13,21 @@ import os
 import re
 import shutil
 import uuid
-
+import platform
 import torch
 import torch.utils.cpp_extension
 from torch.utils.file_baton import FileBaton
+
+
+if platform.system() == 'Windows':
+    # Aggiungi il percorso dei binari CUDA alle directory fidate delle DLL
+    cuda_bin = r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\bin"
+    if os.path.exists(cuda_bin):
+        os.add_dll_directory(cuda_bin)
+
+
+
+
 
 #----------------------------------------------------------------------------
 # Global options.
@@ -128,15 +139,20 @@ def get_plugin(module_name, sources, headers=None, source_dir=None, **build_kwar
                     os.replace(tmpdir, cached_build_dir) # atomic
                 except OSError:
                     # source directory already exists, delete tmpdir and its contents.
-                    shutil.rmtree(tmpdir)
+                #  shutil.rmtree(tmpdir)
                     if not os.path.isdir(cached_build_dir): raise
 
             # Compile.
             cached_sources = [os.path.join(cached_build_dir, os.path.basename(fname)) for fname in sources]
             torch.utils.cpp_extension.load(name=module_name, build_directory=cached_build_dir,
-                verbose=verbose_build, sources=cached_sources, **build_kwargs)
+                verbose=False, sources=cached_sources, **build_kwargs)
         else:
-            torch.utils.cpp_extension.load(name=module_name, verbose=verbose_build, sources=sources, **build_kwargs)
+            torch.utils.cpp_extension.load(name=module_name, verbose=False, sources=sources, **build_kwargs)
+
+        import sys
+        if cached_build_dir not in sys.path:
+            sys.path.insert(0, cached_build_dir) # Diciamo a Python di guardare nella cache
+
 
         # Load.
         module = importlib.import_module(module_name)

@@ -1,189 +1,111 @@
+import os
+import sys
+
+# FIX DLL ERROR: Import torch prima di tutti
+try:
+    import torch
+except:
+    pass
+
+import time
+import threading
+import queue
+import numpy as np
+from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import QTimer
+from PyQt6.QtMultimedia import QMediaPlayer
+import OpenGL.GL as GL
+import SpoutGL
+
 from gan_manager import GANManager
 from mlp_manager import MoodPredictor
 from audio_manager import AudioManager
 from gui import GUI
 from audio_feature_extractor import AudioFeatureExtractor
-from utils.custom_enum import FPS, SampleWindowSize
-
-import utils.logutils as log
-
-import sys
-import time
-from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import QTimer
-from PyQt6.QtMultimedia import QMediaPlayer
-
-import SpoutGL
-import OpenGL.GL as GL
-
-### CUSTOM VARIABLES ###
-
-# Set Visualizer FPS
-FRAMERATE = FPS.FPS_30
-# Set sample window size to retrieve real time from the audio
-SAMPLE_WINDOW_SIZE = SampleWindowSize.WS_1024
-
-GAN_MODEL_PATH = './resources/network-snapshot-000280.pkl'
-MLP_MODEL_PATH = './resources/mood_mlp.pth'
-MLP_SCALAR_PATH = './resources/scaler.pkl'
-USE_GPU = False
-EVAL_MODE = False
-
-def log_constants():
-    log.info("Starting application with the following constants:")
-    log.info(f"FRAMERATE: {int(1000 / FRAMERATE)}")
-    log.info(f"SAMPLE_WINDOW_SIZE: {SAMPLE_WINDOW_SIZE}")
-    log.info(f"GAN_MODEL_PATH: {GAN_MODEL_PATH}")
-    log.info(f"MLP_MODEL_PATH: {MLP_MODEL_PATH}")
-    log.info(f"MLP_MODEL_PATH: {MLP_SCALAR_PATH}")
-    log.info(f"USE_GPU: {USE_GPU}")
-    log.info(f"EVAL_MODE: {EVAL_MODE}")
-
-########################
 
 class VisualizerApp:
     def __init__(self):
-        # Inizializza audio e gui managers
+        # Target: 30 FPS 
+        self.TARGET_GAN_FPS = 30
+        self.GAN_FRAME_TIME = 1.0 / self.TARGET_GAN_FPS
+
+        # Inizializzazione componenti gestionali
         self.audio_system = AudioManager()
         self.window = GUI(self.audio_system, img_size=256)
-
-        self.mlp_manager = MoodPredictor(
-            model_path=MLP_MODEL_PATH,
-            scaler_path=MLP_SCALAR_PATH,
-            use_gpu=USE_GPU
-        )
-
-        self.gan_manager = GANManager(
-            model_path=GAN_MODEL_PATH,
-            latent_dim=512,
-            use_gpu=USE_GPU
-        )
-
-        # --- CONNESSIONI RESET ---
-        # 1. Reset automatico al cambio canzone
-        self.audio_system.player.sourceChanged.connect(self.on_gan_reset)
+        self.extractor = AudioFeatureExtractor()
+        self.mlp = MoodPredictor('./resources/mood_mlp.pth', './resources/scaler.pkl')
+        self.gan = GANManager('./resources/network-snapshot-000280.pkl')
         
-        # 2. Reset manuale da bottone GUI
-        if hasattr(self.window, 'btn_stop'):
-            self.window.btn_stop.clicked.connect(self.on_gan_reset)
-            log.info("Bottone Reset connesso correttamente.")
-        else:
-            log.warning("Bottone 'btn_stop' non trovato nella GUI. Reset manuale disabilitato.")
-        # -------------------------
+        self.frame_queue = queue.Queue(maxsize=1) #queue di frame pronti per la GAN
+        self.shared_data = {"chunk": np.zeros(1024), "latent": None, "feats": self.extractor._get_empty_features()} #memoria condivisa tra i thread
+        self.running = True
 
-        self.audio_extractor = AudioFeatureExtractor()
-        
-        self.spout_sender = SpoutGL.SpoutSender()
-        self.spout_name = "GAN_Visualizer_TD"
-        self.spout_sender.setSenderName(self.spout_name)
-        log.info(f"Spout Sender avviato con nome: {self.spout_name}")
+        threading.Thread(target=self._thread_audio, daemon=True).start() #THREAD 1: Analisi audio asincrona
+        threading.Thread(target=self._thread_gan, daemon=True).start() #THREAD 2: Generazione immagini (30 FPS)
 
-        self.frame_count = 0
-        self.last_time = time.time()
-        self.fps_update_interval = 0.5
-        self.fps_timer_acumulator = 0.0
-        
-        # Configura il timer loop
+        #configurazione Spout per TD
+        self.spout = SpoutGL.SpoutSender()
+        self.spout.setSenderName("GAN_Visualizer_TD")
+
+        # UI a 60Hz (16ms) per evitare micro-lag nel recupero frame
         self.timer = QTimer()
-        self.timer.timeout.connect(self.update_loop)
-        self.timer.start(FRAMERATE)
-
-        # Avvia la GUI
+        self.timer.timeout.connect(self._ui_loop)
+        self.timer.start(16)
+        
+        self.frame_count = 0
+        self.last_fps_time = time.time()
         self.window.show()
 
-    def on_gan_reset(self):
-        """Callback chiamata quando cambia la canzone o si preme reset"""
-        self.gan_manager.reset_state()
+    def _thread_audio(self):
+        while self.running:
+            if self.audio_system.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+                chunk = self.audio_system.get_current_chunk(window_size=1024) #prende parte di audio dal player
+                feats = self.extractor.process_audio(chunk, self.audio_system.sample_rate) #estrae feature numeriche (es bassi)
+                latent = self.mlp.get_latent_vector(feats.spectral_contrast, feats.spectral_flatness, feats.onset_strength, feats.zero_crossing_rate, feats.chroma_variance) #MLP traduce dati audio in coordinate GAN
+                self.shared_data.update({"chunk": chunk, "latent": latent, "feats": feats}) #aggiorna i dati che la GAN legge nel suo thread
+            time.sleep(0.01)
 
-    def update_loop(self):
-        # Se il player non è in Play (è in Pausa o Fermo), non generare nulla
-        if self.audio_system.player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
-            return
-        
-        # --- FPS counter logic ---
-        self.frame_count += 1
-        current_time = time.time()
-        delta_time = current_time - self.last_time
-        self.last_time = current_time
-        
-        self.fps_timer_acumulator += delta_time
-
-        
-        if self.fps_timer_acumulator >= self.fps_update_interval:
-            actual_fps = int(self.frame_count / self.fps_timer_acumulator)
+    def _thread_gan(self):
+        """Thread GAN limitato a 30 FPS"""
+        while self.running:
+            t_start = time.time()
+            if self.shared_data["latent"] is not None:
+                img = self.gan.generate_image(self.shared_data["chunk"], self.shared_data["latent"])
+                if not self.frame_queue.full():
+                    self.frame_queue.put(img)
             
-            # Calcolo Target FPS
-            target_fps = 1000 / FRAMERATE if FRAMERATE > 0 else 0
-            
-            self.window.update_fps_label(actual_fps, int(target_fps))
-            
-            # Reset contatori
-            self.frame_count = 0
-            self.fps_timer_acumulator = 0.0
-        # ------ #
+            # Limitatore FPS preciso
+            elapsed = time.time() - t_start
+            sleep_needed = self.GAN_FRAME_TIME - elapsed
+            if sleep_needed > 0:
+                time.sleep(sleep_needed)
 
-        # Recupero un chunk audio di una finestra temporale
-        chunk = self.audio_system.get_current_chunk(window_size=SAMPLE_WINDOW_SIZE)
-
-        # Calcolo feature audio 
-        audio_feature = self.audio_extractor.process_audio(chunk, self.audio_system.sample_rate)
-
-        # Generazione vettore latente con MLP
-        latent_vector = self.mlp_manager.get_latent_vector(
-            contrast=audio_feature.spectral_contrast,
-            flatness=audio_feature.spectral_flatness,
-            onset=audio_feature.onset_strength,
-            zrc=audio_feature.zero_crossing_rate,
-            chroma_var=audio_feature.chroma_variance
-        )
-
-        # --- DEBUG LOGGING CONTINUO ---
-        # Leggiamo la distanza dal target (più è alta, più la GAN si sta muovendo veloce)
-        z_dist = self.gan_manager.get_distance_to_target()
-        
-        # Stampiamo sovrascrivendo la riga (\r)
-        # Formattiamo i float a 2 cifre decimali per pulizia
-        sys.stdout.write(
-            f"\r[NORM] C:{audio_feature.spectral_contrast:.2f} \
-                F:{audio_feature.spectral_flatness:.3f} \
-                O:{audio_feature.onset_strength:.2f} \
-                Z:{audio_feature.zero_crossing_rate:.3f} \
-                V:{audio_feature.chroma_variance:.3f} | \
-                [GAN] Move:{z_dist:.3f}   "
-        )
+    def _ui_loop(self):
+        """Thread principale: Log, GUI e Invio Video."""
+        f = self.shared_data["feats"]
+        sys.stdout.write(f"\r[NORM] C:{f.spectral_contrast:.2f} F:{f.spectral_flatness:.3f} O:{f.onset_strength:.2f} Z:{f.zero_crossing_rate:.3f} | GAN Move:{self.gan.get_distance_to_target():.3f}   ")
         sys.stdout.flush()
-        # -----------------------------
 
-        # Generazione immagine con GAN
-        final_image = self.gan_manager.generate_image(
-            audio_chunk=chunk,
-            features=audio_feature,
-            mlp_latent_vector=latent_vector
-        )
-        if final_image is not None:
-            self.window.set_image(final_image)
-
-            height, width, _ = final_image.shape
-
-            # invia l'immagine al canale spout
-            self.spout_sender.sendImage(final_image.tobytes(), width, height, GL.GL_RGB, False, 0)
+        try:
+            # Se c'è un frame pronto, lo prendiamo subito (grazie ai 60Hz della UI)
+            img = self.frame_queue.get_nowait()
+            self.frame_count += 1
+            self.window.set_image(img)
+            self.spout.sendImage(img.tobytes(), img.shape[1], img.shape[0], GL.GL_RGB, False, 0)
+        except queue.Empty:
+            pass
+        
+        #calcolo FPS reali visualizzati ogni secondo
+        now = time.time()
+        if now - self.last_fps_time >= 1.0:
+            self.window.update_fps_label(self.frame_count, self.TARGET_GAN_FPS)
+            self.frame_count = 0
+            self.last_fps_time = now
 
     def __del__(self):
-        # Rilascia la memoria di Spout quando l'applicazione si chiude
-        if hasattr(self, 'spout_sender'):
-            self.spout_sender.releaseSender()
-
-
-def main():
-    app = QApplication(sys.argv)
-    log_constants()
-    try:
-        controller = VisualizerApp()
-        sys.exit(app.exec())
-    except Exception as e:
-        log.error(e)
-    finally:
-        sys.exit(1)
+        self.running = False
 
 if __name__ == "__main__":
-    main()
+    app = QApplication(sys.argv)
+    core = VisualizerApp()
+    sys.exit(app.exec())
