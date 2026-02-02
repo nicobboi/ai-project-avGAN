@@ -25,6 +25,9 @@ from audio_feature_extractor import AudioFeatureExtractor
 
 class VisualizerApp:
     def __init__(self):
+        
+        self.running = True
+        
         # Target: 30 FPS 
         self.TARGET_GAN_FPS = 30
         self.GAN_FRAME_TIME = 1.0 / self.TARGET_GAN_FPS
@@ -38,11 +41,7 @@ class VisualizerApp:
         
         self.frame_queue = queue.Queue(maxsize=1) #queue di frame pronti per la GAN
         self.shared_data = {"chunk": np.zeros(1024), "latent": None, "feats": self.extractor._get_empty_features()} #memoria condivisa tra i thread
-        self.running = True
-
-        threading.Thread(target=self._thread_audio, daemon=True).start() #THREAD 1: Analisi audio asincrona
-        threading.Thread(target=self._thread_gan, daemon=True).start() #THREAD 2: Generazione immagini (30 FPS)
-
+        
         #configurazione Spout per TD
         self.spout = SpoutGL.SpoutSender()
         self.spout.setSenderName("GAN_Visualizer_TD")
@@ -55,6 +54,10 @@ class VisualizerApp:
         self.frame_count = 0
         self.last_fps_time = time.time()
         self.window.show()
+        
+        # AVVIA I THREAD SOLO COME ULTIMA OPERAZIONE
+        threading.Thread(target=self._thread_audio, daemon=True).start()
+        threading.Thread(target=self._thread_gan, daemon=True).start()
 
     def _thread_audio(self):
         while self.running:
