@@ -4,39 +4,39 @@
 
 - Motivation for the problem and its relevance. 
 <p>
-The project addresses a specific challenge in performative music visualization: enhancing the listening experience through <strong>generative visual art</strong>. Audio-reactive visuals are frequently used in live concerts and music videos to increase listener engagement and immersion.
+This project addresses the automation of visual content generation in live performance contexts. In audio-visual performances, creating synchronized visuals typically requires manual keyframing or complex node-based programming. The motivation is to leverage generative deep learning to automate this workflow, allowing for real-time visual streams that react coherently to audio features without continuous human intervention.
 </p>
 
 -  Target audience interested in the problem.
 <p>
-<strong>Musicians</strong>, <strong>Video Makers</strong>, <strong>VJs</strong>, and digital artists interested in real-time, audio-reactive visual content generation.
+<strong>Musicians, Creative Coders, and VJs</strong> interested in integrating automated, AI-driven visual synthesis into their live setups.
 </P>
 
 - Benefits of a proposed solution.
 <p>
-Creating high-quality reactive visuals typically requires advanced skills in complex software like <strong>TouchDesigner</strong>. Our solution democratizes this process using <strong>Artificial Intelligence</strong>, allowing users to generate professional-grade, semantically coherent visuals without manual keyframing. While it does not aim to replace expert designers, it offers an accessible tool for automated, high-end visual generation.
+While industry-standard tools like <strong>TouchDesigner</strong> provide extensive control, they have a steep learning curve. The proposed solution offers an abstraction layer: it uses a neural network to handle the mapping between sound and video. This allows users to generate high-quality, semantically meaningful visuals with minimal setup time, acting as a co-creative tool rather than a manual editor.
 </p>
 
 ### Proposed Solution
 
 - Approach to the solution.
 <br>
-The system operates via a hybrid pipeline. In the offline phase, we use <strong>OpenAI CLIP</strong> to explore the GAN's latent space and identify coordinates associated with specific textual prompts (e.g., "calm blue"). An <strong>MLP</strong> is then trained to map audio features to these verified coordinates. In the real-time phase, the application extracts audio features using <strong>Librosa</strong>, predicts the target latent vector via the MLP, generates images using <strong>StyleGAN3</strong>, and streams the video texture to external software via <strong>SpoutGL</strong>.
+The system implements a hybrid architecture. <strong>Offline</strong>, we employed <strong>OpenAI CLIP</strong> to mine the GAN's latent space for coordinates matching specific semantic prompts (e.g., "fiery red"), and trained an <strong>MLP</strong> to map audio features to these coordinates. <strong>Real-Time</strong>, the pipeline extracts features via <strong>Librosa</strong>, infers the target latent vector via the MLP, generates frames using <strong>StyleGAN3</strong>, and transmits the output via <strong>SpoutGL</strong>.
 
 
 - Computational challenges faced.
 <br>
-We successfully addressed several key technical challenges:
+We addressed the following engineering challenges:
 <br>
-&nbsp;&nbsp;+ <strong>Performance:</strong> Running StyleGAN3 (a heavy model) in real-time was the primary bottleneck. We implemented a <strong>multithreaded architecture</strong> separating audio playback, neural inference, and GUI rendering.
+&nbsp;&nbsp;+ <strong>Latency vs. Throughput:</strong> StyleGAN3 inference is computationally expensive. To prevent audio dropouts and the loss of FPS, we implemented a <strong>multithreaded architecture.</strong> 
 <br>
-&nbsp;&nbsp;+ <strong>Synchronization:</strong> Ensuring low-latency alignment between audio onsets and visual changes.
+&nbsp;&nbsp;+ <strong>Synchronization:</strong> Ensuring the visual reaction aligns with audio transients despite inference latency.
 <br>
-&nbsp;&nbsp;+ <strong>Fluidity:</strong> To prevent jarring visual jumps, we implemented <strong>Spherical Linear Interpolation (Slerp)</strong>, dynamically modulated by the audio's RMS energy.
+&nbsp;&nbsp;+ <strong>Temporal Coherence:</strong> To avoid jittery transitions, we implemented <strong>Spherical Linear Interpolation (Slerp)</strong> with a dynamic step size modulated by the signal's RMS energy.
 
 - Task distribution within the group.
 <br>
-The team divided tasks as follows:
+The workload was distributed as follows:
 <br>
 &nbsp;&nbsp;- <strong>Audio Processing:</strong> Nicolò Ragazzi
 <br>
@@ -48,7 +48,7 @@ The team divided tasks as follows:
 
 - Summary of achieved results.
 <br>
-We developed a Python application capable of loading audio files, analyzing them in real-time, and generating a <strong>30 FPS</strong> video stream reactive to 5 distinct musical features. The output is compatible with professional setups via <strong>Spout</strong> integration.
+We successfully developed a Python application that processes audio input and generates a video stream at a stable <strong>30 FPS</strong>. The system maps 5 distinct audio descriptors to visual parameters and supports interoperability via <strong>Spout</strong>.
 
 ## 2. Proposed Method
 
@@ -56,29 +56,29 @@ We developed a Python application capable of loading audio files, analyzing them
 
 - Alternative solutions considered and justification for the chosen approach.
 <br>
-We selected <strong>StyleGAN3</strong> over other architectures for its superior texture coherence and equivariance, which minimizes "texture sticking" artifacts during animation. Furthermore, integrating an intermediate <strong>MLP</strong> was essential to translate abstract audio "moods" into valid latent coordinates, preventing the chaotic output that would result from driving the GAN directly with raw audio data.
+We selected <strong>StyleGAN3</strong> over StyleGAN2 due to its <strong>equivariance</strong> properties, which significantly reduce "texture sticking" artifacts during continuous interpolation. We introduced an intermediate <strong>MLP</strong> because mapping raw audio features directly to the latent space ($w$) resulted in noisy output. The MLP serves as a semantic bridge, translating audio features into meaningful latent coordinates.
 
 - Methodology for performance measurement.
 <br>
-Performance is monitored via a real-time <strong>FPS counter</strong> in the GUI, which tracks frames rendered and sent via Spout against the 30 FPS target. We also qualitatively assess the latency between audio transients and visual response.
+Performance is evaluated quantitatively using a real-time <strong>FPS counter</strong> implemented in the GUI, tracking the effective frame delivery rate via Spout. Qualitatively, we assessed the latency between audio onsets and visual responses during playback.
 
 - Solution's Architecture Details:
 <br>
-The system relies on three core components:
+The system relies on three core modules:
 <br>
-&nbsp;&nbsp;+ <strong>Feature Extraction:</strong> We extract 5 descriptors per audio chunk:
+&nbsp;&nbsp;+ <strong>Feature Extraction:</strong> We compute 5 descriptors per 1024-sample chunk:
 <br>
-&nbsp;&nbsp;&nbsp;&nbsp;- <em>Spectral Contrast</em> (distinguishes tone from noise)
+&nbsp;&nbsp;&nbsp;&nbsp;- <em>Spectral Contrast</em> (Timbre definition)
 <br>
-&nbsp;&nbsp;&nbsp;&nbsp;- <em>Spectral Flatness</em> (detects noisiness/sibilance)
+&nbsp;&nbsp;&nbsp;&nbsp;- <em>Spectral Flatness</em> (Noise/Sibilance detection)
 <br>
-&nbsp;&nbsp;&nbsp;&nbsp;- <em>Onset Strength</em> (detects rhythmic beats)
+&nbsp;&nbsp;&nbsp;&nbsp;- <em>Onset Strength</em> (Rhythmic transient detection)
 <br>
-&nbsp;&nbsp;&nbsp;&nbsp;- <em>Zero Crossing Rate</em> (measures signal roughness)
+&nbsp;&nbsp;&nbsp;&nbsp;- <em>Zero Crossing Rate</em> (Signal roughness)
 <br>
-&nbsp;&nbsp;&nbsp;&nbsp;- <em>Chroma Variance</em> (measures harmonic complexity)
+&nbsp;&nbsp;&nbsp;&nbsp;- <em>Chroma Variance</em> (Harmonic complexity)
 <br>
-&nbsp;&nbsp;+ <strong>Semantic Mapping:</strong> CLIP was used to define three distinct "mood" clusters:
+&nbsp;&nbsp;+ <strong>Semantic Mapping:</strong> We clustered the latent space using CLIP into three classes:
 <br>
 &nbsp;&nbsp;&nbsp;&nbsp;- <em>Aggressive</em> ("intense fiery red, jagged shapes")
 <br>
@@ -86,7 +86,7 @@ The system relies on three core components:
 <br>
 &nbsp;&nbsp;&nbsp;&nbsp;- <em>Vibrant</em> ("vibrant multicolored geometric lines")
 <br>
-&nbsp;&nbsp;+ <strong>Generation:</strong> The transition between latent vectors is smoothed using interpolation steps calculated based on audio intensity.
+&nbsp;&nbsp;+ <strong>Generation:</strong> Transitions are smoothed using energy-dependent interpolation steps to maintain visual fluidity.
 
 ## 3. Experimental Results
 
@@ -94,27 +94,27 @@ The system relies on three core components:
 
 - Instructions for the demonstration.
 <br>
-To demonstrate the system:
+To execute the system:
 <br>
-&nbsp;&nbsp;* Launch <strong>TouchDesigner</strong> (Spout receiver).
+&nbsp;&nbsp;* Launch a Spout receiver (e.g., <strong>TouchDesigner</strong>).
 <br>
 &nbsp;&nbsp;* Run the main script: <code>python main.py</code>.
 <br>
 &nbsp;&nbsp;* Load a <strong>.wav</strong> file via the GUI.
 <br>
-&nbsp;&nbsp;* Wait for the decoding phase.
+&nbsp;&nbsp;* Await the decoding process.
 <br>
-&nbsp;&nbsp;* Press <strong>Play</strong> to start video generation and Spout transmission.
+&nbsp;&nbsp;* Press <strong>Play</strong> to initiate generation and transmission.
 
 - Technologies and versions used (for reproducibility).
 <br>
 &nbsp;&nbsp;- <strong>Language:</strong> Python 3.12.10
 <br>
-&nbsp;&nbsp;- <strong>Core AI:</strong> PyTorch 2.9.1+cu126 (CUDA required)
+&nbsp;&nbsp;- <strong>Deep Learning:</strong> PyTorch 2.9.1+cu126 (CUDA required)
 <br>
-&nbsp;&nbsp;- <strong>Audio:</strong> Librosa 0.11.0, PyDub 0.25.1
+&nbsp;&nbsp;- <strong>DSP:</strong> Librosa 0.11.0, PyDub 0.25.1
 <br>
-&nbsp;&nbsp;- <strong>GUI/Video:</strong> PyQt6 6.10.2, SpoutGL, OpenGL
+&nbsp;&nbsp;- <strong>Graphics/UI:</strong> PyQt6 6.10.2, SpoutGL, OpenGL
 <br>
 &nbsp;&nbsp;- <strong>Models:</strong> StyleGAN3 (pretrained snapshot), OpenAI CLIP, Custom MLP.
 
@@ -122,11 +122,11 @@ To demonstrate the system:
 
 - Results of the best configuration.
 <br>
-Tested on an <strong>NVIDIA RTX 4060</strong>, the system maintains a stable <strong>30 FPS</strong> at 256x256 resolution (upscalable in post-processing). The perceived latency is under 100ms, providing effective audio-visual synchronization. The Audio-to-Color mapping (e.g., Heavy Bass = Red/Fire) is consistent due to supervised CLIP training.
+Tested on an <strong>NVIDIA RTX 4060</strong>, the system maintains a stable <strong>30 FPS</strong> at <strong>256x256</strong> resolution (upscalable via external post-processing). The perceived latency is <100ms, ensuring effective synchronization. The MLP consistently maps low-frequency energy (bass) to the "Aggressive/Red" cluster as defined in the training phase.
 
 - Ablation Study: Comparison across configurations.
 <br>
-Without the <strong>MLP</strong>, connecting audio features directly to the latent space resulted in nonsensical, flickering images. Without <strong>RMS-based step modulation</strong>, transitions were either too slow during drops or too jittery during ambient sections.
+Ablation testing showed that without the <strong>MLP</strong>, direct mapping of audio to latent space produced incoherent, high-frequency visual noise. Removing the <strong>RMS-based smoothing</strong> resulted in stuttering visuals during low-energy sections and chaotic transitions during high-energy sections.
 
 ## 4. Discussion and Conclusions
 
@@ -134,26 +134,26 @@ Without the <strong>MLP</strong>, connecting audio features directly to the late
 
 - Analysis of performance in relation to expectations.
 <br>
-The project met its performance expectations. Thanks to the <strong>multithreaded optimization</strong>, we achieved a stable application suitable for real-time usage.
+The results align with the initial requirements. The implementation of <strong>asynchronous threading</strong> was critical; it successfully decoupled the heavy GPU inference from the audio playback thread, preventing buffer underruns.
 
 ### Method Validity
 
 - Evaluation if the method meets expectations.
 <br>
-Using <strong>CLIP</strong> to "label" the latent space proved superior to random generation. It ensures the visual reactivity is <strong>semantic</strong>—changing the *atmosphere* of the video—rather than just mechanical movement.
+The CLIP-based mining approach proved superior to random selection. It imbues the GAN's output with <strong>semantic reactivity</strong>—changing the visual atmosphere based on audio mood—rather than merely modulating geometric parameters.
 
 ### Limitations and Maturity
 
 - Limits of applicability and biases.
 <br>
-&nbsp;&nbsp;* <strong>Hardware:</strong> Strictly requires an NVIDIA GPU with <strong>CUDA</strong> support.
+&nbsp;&nbsp;* <strong>Hardware:</strong> Strict dependency on NVIDIA GPUs with <strong>CUDA</strong> support.
 <br>
-&nbsp;&nbsp;* <strong>Fixed Domain:</strong> The model can only generate imagery within the domain of its training dataset.
+&nbsp;&nbsp;* <strong>Domain Lock:</strong> The system is limited to the visual domain of the pre-trained StyleGAN dataset (e.g., abstract art).
 <br>
-&nbsp;&nbsp;* <strong>Resolution:</strong> Currently limited to 256x256px to maintain real-time framerates.
+&nbsp;&nbsp;* <strong>Resolution:</strong> Currently constrained to 256x256px to ensure real-time performance.
 
 ### Future Works
 
 - Proposals to advance the project.
 <br>
-Future improvements could include <strong>TensorRT</strong> optimization to increase resolution or FPS. Additionally, implementing a predictive <strong>Beat Tracking</strong> algorithm would allow the system to anticipate musical drops, further tightening visual synchronization.
+Future development will focus on model optimization using <strong>TensorRT</strong> to increase resolution or framerate. Additionally, integrating a predictive <strong>Beat Tracking</strong> algorithm could compensate for system latency by anticipating musical drops.
