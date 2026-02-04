@@ -71,7 +71,7 @@ class MoodPredictor:
         """
         Prende le feature audio grezze, le normalizza e restituisce il vettore latente.
         
-        Input: 4 float
+        Input: 5 float
         Output: Numpy array (512,) float32
         """
         if not self.model_loaded:

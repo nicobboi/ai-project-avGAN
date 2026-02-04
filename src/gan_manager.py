@@ -2,6 +2,7 @@ import torch
 import os
 import pickle
 import numpy as np
+import utils.logutils as log
 
 # Ottimizzazioni per GPU NVIDIA
 torch.backends.cudnn.benchmark = True
@@ -10,14 +11,22 @@ torch.backends.cuda.matmul.allow_tf32 = True
 # SELEZIONE DEVICE (cuda se disponibile, se no CPU)
 class GANManager:
     def __init__(self, model_path, latent_dim=512, use_gpu=True):
-        self.device = torch.device('cuda' if use_gpu and torch.cuda.is_available() else 'cpu')
+        if use_gpu and torch.cuda.is_available():
+            self.device = torch.device('cuda')
+            log.info("MLP Manager: Modalità GPU (CUDA) attivata.")
+        else:
+            self.device = torch.device('cpu')
+            if use_gpu and not torch.cuda.is_available():
+                log.warning("MLP Manager: GPU richiesta ma non trovata. Fallback su CPU.")
+            else:
+                log.info("MLP Manager: Modalità CPU forzata.")
         with open(model_path, 'rb') as f:
             self.model = pickle.load(f)['G_ema'].to(self.device).eval() #caricamento modello su scheda video e impostazione modalità 'eval' per risparmio memoria
         self.latent_dim = self.model.z_dim if hasattr(self.model, 'z_dim') else latent_dim #identifica la dimensione del vettore latente
         self.c = torch.zeros([1, self.model.c_dim]).to(self.device) if self.model.c_dim > 0 else None # Se il modello è condizionale (usa classi), crea un vettore 'c' di zeri.
         self.reset_state() #inizializzazione della posizione nello spazio latente
 
-# Crea un punto di partenza casuale e un target identico, evita scatti all'avvio
+    # Crea un punto di partenza casuale e un target identico, evita scatti all'avvio
     def reset_state(self):
         self.current_z = torch.randn(1, self.latent_dim).to(self.device)
         self.target_z = self.current_z.clone()

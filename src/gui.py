@@ -113,7 +113,7 @@ class GUI(QWidget):
         self.lbl_image.setPixmap(QPixmap.fromImage(q_img))
 
     def open_file_dialog(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Apri Audio", "", "Audio (*.mp3 *.wav *.ogg *.flac)")
+        file_path, _ = QFileDialog.getOpenFileName(self, "Apri Audio", "", "Audio (*.wav)")
         if file_path:
             self.btn_play.setEnabled(False)
             self.btn_stop.setEnabled(False)

@@ -33,9 +33,9 @@ class VisualizerApp:
         self.GAN_FRAME_TIME = 1.0 / self.TARGET_GAN_FPS
 
         # Inizializzazione componenti gestionali
-        self.audio_system = AudioManager()
-        self.window = GUI(self.audio_system, img_size=256)
         self.extractor = AudioFeatureExtractor()
+        self.audio_system = AudioManager(self.extractor)
+        self.window = GUI(self.audio_system, img_size=256)
         self.mlp = MoodPredictor('./resources/mood_mlp.pth', './resources/scaler.pkl')
         self.gan = GANManager('./resources/network-snapshot-000280.pkl')
         
@@ -86,7 +86,7 @@ class VisualizerApp:
     def _ui_loop(self):
         """Thread principale: Log, GUI e Invio Video."""
         f = self.shared_data["feats"]
-        sys.stdout.write(f"\r[NORM] C:{f.spectral_contrast:.2f} F:{f.spectral_flatness:.3f} O:{f.onset_strength:.2f} Z:{f.zero_crossing_rate:.3f} | GAN Move:{self.gan.get_distance_to_target():.3f}   ")
+        sys.stdout.write(f"\r[NORM] C:{f.spectral_contrast:.2f} F:{f.spectral_flatness:.4f} O:{f.onset_strength:.3f} Z:{f.zero_crossing_rate:.4f} CV:{f.chroma_variance:.4f} | GAN Move:{self.gan.get_distance_to_target():.2f}   ")
         sys.stdout.flush()
 
         try:

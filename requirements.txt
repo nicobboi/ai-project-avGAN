@@ -4,11 +4,11 @@ torchvision == 0.24.1+cu126
 torchaudio == 2.9.1+cu126
 
 PyQt6 == 6.10.2
-pydub == 0.25.1
 kornia == 0.8.2
 einops == 0.8.1
 PyOpenGL == 3.1.10
 requests == 2.32.5
 scipy == 1.17.0
 librosa == 0.11.0
-./libs/spoutgl-0.1.1-cp312-cp312-win_amd64.whl
+SpoutGL == 0.1.1
+ninja

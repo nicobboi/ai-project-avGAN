@@ -1,5 +1,5 @@
 import numpy as np
-from pydub import AudioSegment
+import librosa
 import threading
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtCore import QUrl, QObject, pyqtSignal
@@ -15,7 +15,7 @@ class AudioManager(QObject):
     # Trasporta: (Array Numpy dei dati, Sample Rate intero)
     _internal_data_ready = pyqtSignal(object, int)
 
-    def __init__(self):
+    def __init__(self, audio_feature_extractor=None):
         super().__init__()
         
         # Setup MediaPlayer -> riproduzione audio
@@ -27,6 +27,7 @@ class AudioManager(QObject):
         # Setup dati per l'IA
         self.full_audio_data = np.array([], dtype=np.float32)
         self.sample_rate = 44100
+        self.audio_feature_extractor = audio_feature_extractor
         
         # Connettiamo il segnale interno alla funzione che salva i dati
         self._internal_data_ready.connect(self._finalize_loading)
@@ -56,29 +57,30 @@ class AudioManager(QObject):
             log.info(f"Caricamento file: {file_path}...")
             
             # Carica audio con PyDub
-            audio = AudioSegment.from_wav(file_path)
-
-            # Ottieni info
-            sr = audio.frame_rate
-            # Conversione in mono (se stereo)
-            if audio.channels > 1:
-                audio = audio.set_channels(1)
-            
-            # Conversione in array NumPy (Int16)
-            samples = np.array(audio.get_array_of_samples())
-
-            # --- CALCOLO AUTOMATICO NORMALIZZAZIONE ---
-            # audio.sample_width ti dice quanti BYTES usa (2=16bit, 3=24bit, 4=32bit)
-            bytes_per_sample = audio.sample_width
-            bits_per_sample = bytes_per_sample * 8
-            
-            # Calcoliamo il divisore usando l'operatore bitwise shift
-            # Esempio 16 bit: 1 << 15 = 32768
-            # Esempio 24 bit: 1 << 23 = 8388608
-            max_val = float(1 << (bits_per_sample - 1))
-            
-            # Normalizzazione in Float32 (-1.0 a 1.0) per la GAN
-            y = np.clip(samples.astype(np.float32) / max_val, -1.0, 1.0)
+            #audio = AudioSegment.from_wav(file_path)
+#
+            ## Ottieni info
+            #sr = audio.frame_rate
+            ## Conversione in mono (se stereo)
+            #if audio.channels > 1:
+            #    audio = audio.set_channels(1)
+            #
+            ## Conversione in array NumPy (Int16)
+            #samples = np.array(audio.get_array_of_samples())
+#
+            ## --- CALCOLO AUTOMATICO NORMALIZZAZIONE ---
+            ## audio.sample_width ti dice quanti BYTES usa (2=16bit, 3=24bit, 4=32bit)
+            #bytes_per_sample = audio.sample_width
+            #bits_per_sample = bytes_per_sample * 8
+            #
+            ## Calcoliamo il divisore usando l'operatore bitwise shift
+            ## Esempio 16 bit: 1 << 15 = 32768
+            ## Esempio 24 bit: 1 << 23 = 8388608
+            #max_val = float(1 << (bits_per_sample - 1))
+            #
+            ## Normalizzazione in Float32 (-1.0 a 1.0) per la GAN
+            #y = np.clip(samples.astype(np.float32) / max_val, -1.0, 1.0)
+            y, sr = librosa.load(file_path, sr=44100, mono=True)
             
             # EMETTI IL SEGNALE
             self._internal_data_ready.emit(y, sr)
@@ -91,6 +93,8 @@ class AudioManager(QObject):
         Emette evento di termine caricamento e decodifica file.
         """
         self.full_audio_data = data
+        if self.audio_feature_extractor is not None:
+            self.audio_feature_extractor.compute_features_ranges(data, sr)
         self.sample_rate = sr
         log.success(f"Dati Audio Pronti! Campioni: {len(data)}, SR: {sr}")
         self.decoding_finished.emit()
