@@ -24,6 +24,7 @@ You can tweak the system behavior by editing the **Environment Variables** secti
 | `USE_GPU` | Enables CUDA acceleration. Required for real-time inference. | `True` |
 | `GAN_MODEL_PATH` | Path to the StyleGAN `.pkl` snapshot. | `./resources/gan_model.pkl` |
 | `MLP_MODEL_PATH` | Path to the MLP `.pth` weights. | `./resources/mood_mlp.pth` |
+| `MLP_SCALER_PATH` | Path to the MLP `.pkl` scaler. | `./resources/scaler.pkl` |
 | `SPOUT_SENDER_NAME` | The Spout sender name visible in TouchDesigner. | `"GAN_Visualizer_TD"` |
 
 ---
@@ -56,7 +57,7 @@ source venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 **4. Run the application.**<br>
-**IMPORTANT: Open from "x64 Native Tools Command Prompt for VS 2022**
+**IMPORTANT: Open from "x64 Native Tools Command Prompt for VS 2022"**
 ```bash
 python src\main.py
 ```

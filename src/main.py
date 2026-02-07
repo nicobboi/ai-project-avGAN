@@ -28,7 +28,7 @@ import utils.logutils as log
 USE_GPU = True
 MLP_MODEL_PATH = './resources/mood_mlp.pth'
 MLP_SCALER_PATH = './resources/scaler.pkl'
-GAN_MODEL_PATH = './resources/network-snapshot-000280.pkl'
+GAN_MODEL_PATH = './resources/gan_model.pkl'
 SPOUT_SENDER_NAME = "GAN_Visualizer_TD"
 
 def _log_env_variables():
