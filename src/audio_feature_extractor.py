@@ -5,6 +5,9 @@ import utils.logutils as log
 
 @dataclass
 class AudioAnalysis:
+    """
+    Data structure to hold the extracted audio features for a specific frame.
+    """
     spectral_contrast: float
     spectral_flatness: float
     onset_strength: float
@@ -12,14 +15,32 @@ class AudioAnalysis:
     chroma_variance: float
 
 class AudioFeatureExtractor:
+    """
+    Handles the extraction of spectral features from raw audio data using Librosa.
+    
+    This class also manages the pre-computation of feature ranges (min/max percentiles)
+    for a specific audio file to normalize values effectively during playback.
+    """
 
     def __init__(self):
         self.features_ranges = None
 
 
     def process_audio(self, audio_data: np.ndarray, sr: int) -> AudioAnalysis:
+        """
+        Extracts features from a single audio chunk in real-time.
+        
+        Args:
+            audio_data (np.ndarray): The raw floating-point audio samples.
+            sr (int): Sample rate.
+            
+        Returns:
+            AudioAnalysis: Dataclass containing the computed features, or empty values if silent.
+        """
         if len(audio_data) == 0: return self._get_empty_features()
         y = audio_data.astype(np.float32)
+        
+        # Silence detection (threshold 0.005)
         if np.sqrt(np.mean(y**2)) < 0.005: return self._get_empty_features()
 
         n_samples = len(y)
@@ -28,8 +49,12 @@ class AudioFeatureExtractor:
         hop_length = n_fft // 4
 
         try:
-            S = np.abs(librosa.stft(y, n_fft=n_fft, hop_length=hop_length)) #ottimizzazione, trasformata di Fourier eseguita una sola volta per tutto il chunk
-            contrast = librosa.feature.spectral_contrast(S=S, sr=sr, n_fft=n_fft, hop_length=hop_length, n_bands=6) # Analisi differenza tra picchi di energia e valli dello spettro, permette di capire il livello di definizione del suono
+            # Optimization: Short-time Fourier Transform executed once for the whole chunk
+            S = np.abs(librosa.stft(y, n_fft=n_fft, hop_length=hop_length)) 
+            
+            # Analysis of the difference between energy peaks and valleys in the spectrum, 
+            # indicates sound definition/texture
+            contrast = librosa.feature.spectral_contrast(S=S, sr=sr, n_fft=n_fft, hop_length=hop_length, n_bands=6) 
             flatness = librosa.feature.spectral_flatness(S=S) 
             onset_env = librosa.onset.onset_strength(S=librosa.amplitude_to_db(S), sr=sr)
             zcr = librosa.feature.zero_crossing_rate(y, frame_length=n_fft, hop_length=hop_length)
@@ -45,12 +70,19 @@ class AudioFeatureExtractor:
         except: return AudioFeatureExtractor._get_empty_features()
 
     def compute_features_ranges(self, y: np.ndarray, sr: int) -> None:
+        """
+        Pre-computes the dynamic range (10th and 90th percentiles) for each feature
+        across the entire audio file.
+        
+        This allows `process_audio` to return normalized/clipped values relative 
+        to the specific song's dynamics, rather than absolute mathematical limits.
+        """
         rows = []
         CHUNK_SIZE = 1024
         
         try:
             total_samples = len(y)
-            # Calcolo quanti chunk ci sono
+            # Calculate how many chunks there are
             num_chunks = int(np.ceil(total_samples / CHUNK_SIZE))
             
             for i in range(num_chunks):
@@ -59,19 +91,19 @@ class AudioFeatureExtractor:
                 
                 chunk = y[start:end]
                 
-                # Saltiamo chunk troppo piccoli (coda del file)
+                # Skip chunks that are too small (file tail)
                 if len(chunk) < 512: 
                     continue
 
-                # Estrazione Feature tramite il metodo standard
+                # Feature extraction via the standard method
                 features: AudioAnalysis = self.process_audio(chunk, sr)
                 
                 
-                # Se è tornato -1.0, significa silenzio o errore. SALTA.
+                # If -1.0 is returned, it means silence or error. SKIP.
                 if features.spectral_contrast == -1.0:
                     continue
 
-                # Creazione riga dati
+                # Create data row
                 row = {
                     'chunk_index': i,
                     'timestamp_sec': round(start / sr, 3),
@@ -83,12 +115,12 @@ class AudioFeatureExtractor:
                 }
                 rows.append(row)
             
-            # --- CALCOLO PERCENTILI ---
+            # --- PERCENTILE CALCULATION ---
             if not rows:
-                log.warning("Nessuna feature valida estratta per il calcolo dei range.")
+                log.warning("No valid features extracted for range calculation.")
                 return
 
-            # Mappa tra le chiavi brevi usate nel row e le chiavi complete attese da process_audio
+            # Map between short keys used in 'row' and full keys expected by process_audio
             key_map = {
                 'contrast': 'spectral_contrast',
                 'flatness': 'spectral_flatness',
@@ -100,24 +132,28 @@ class AudioFeatureExtractor:
             computed_ranges = {}
 
             for short_key, full_key in key_map.items():
-                # Estraiamo tutti i valori per quella specifica feature da tutte le righe
+                # Extract all values for that specific feature from all rows
                 values = [r[short_key] for r in rows]
                 
-                # Calcolo percentili
+                # Calculate percentiles
                 pMin = np.percentile(values, 10)
                 pMax = np.percentile(values, 90)
                 
-                # Salviamo usando la chiave "full" (es. spectral_contrast)
+                # Save using the "full" key (e.g., spectral_contrast)
                 computed_ranges[full_key] = (round(float(pMin), 4), round(float(pMax), 4))
 
-            # Salviamo lo stato nella classe
+            # Save state in the class
             self.features_ranges = computed_ranges
             log.info(f"Features ranges computed (from {len(rows)} chunks): {computed_ranges}")
 
         except Exception as e:
-            log.error(f"Errore estrazione range feature: {e}")
+            log.error(f"Error extracting feature ranges: {e}")
 
     def _round_feature_value(self, feature_name: str, value: float, round_to: int = 2) -> float:
+        """
+        Internal helper: Clips the value to the pre-computed range (if available)
+        and rounds it. This acts as a normalizer.
+        """
         if self.features_ranges is None or feature_name not in self.features_ranges:
              return round(float(value), round_to)
 
@@ -129,4 +165,5 @@ class AudioFeatureExtractor:
 
     @staticmethod
     def _get_empty_features():
+        """Returns a placeholder object for silence or errors."""
         return AudioAnalysis(-1.0, -1.0, -1.0, -1.0, -1.0)

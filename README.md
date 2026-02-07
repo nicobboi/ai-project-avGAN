@@ -1,32 +1,39 @@
-# 🧠 Real-Time Neural AV
+# 🧠 Real-Time Neural AV (StyleGAN3 + MLP Audio-Reactive)
 
-> **A Real-Time Generative Audio-Visual Performance system powered by StyleGAN, Python, and TouchDesigner.**
+> **A Real-Time Generative Audio-Visual Performance system. It uses a Feed-Forward Neural Network (MLP) to bridge audio features into the latent space of a pre-trained StyleGAN3 model.**
 
 ## 📖 Overview
-This application creates real-time, audio-reactive visuals using a deep learning StyleGAN model. It analyzes audio chunks on the fly, generates corresponding latent representations, and renders the visual frames. The output is displayed in a PyQt6 GUI and simultaneously streamed at zero-latency to **TouchDesigner** via the **SpoutGL** protocol for live mapping and post-processing.
+This application creates real-time, audio-reactive visuals by chaining two neural networks:
+1.  **Audio Feature Extractor**: Analyzes audio chunks using `librosa` to extract spectral contrast, flatness, onset strength, and more.
+2.  **Mood Predictor (MLP)**: A lightweight neural network maps these audio features to a high-dimensional Latent Vector ($z$).
+3.  **StyleGAN Generator**: Generates visual frames from the latent vectors.
 
-## ⚙️ Configuration (Custom Variables)
-Before running the application, you can configure the behavior of the visualizer by editing the `### CUSTOM VARIABLES ###` section in `main.py`:
+The output is displayed in a PyQt6 GUI and simultaneously streamed at zero-latency to **TouchDesigner** via the **SpoutGL** protocol.
 
-| Variable | Description |
-|----------|-------------|
-| `FRAMERATE` | The target refresh rate of the GUI and Spout stream (e.g., `FPS.FPS_30`). |
-| `SAMPLE_WINDOW_SIZE` | The size of the audio chunk analyzed per frame (e.g., `SampleWindowSize.WS_1024`). Controls the reactivity. |
-| `MODEL_PATH` | Path to the PyTorch StyleGAN model `.pt` file. |
-| `USE_GPU` | **Boolean (`True`/`False`)**. Enables CUDA acceleration. *Highly recommended for real-time performance and TouchDesigner integration.* |
-| `EVAL_MODE` | **Boolean (`True`/`False`)**. Sets the PyTorch model to evaluation mode (disables dropouts/batch norms). |
+## 📂 Project Structure & Resources
+Ensure your project folder has a `resources/` directory containing your trained models:
+* `./resources/gan_model.pkl`: The StyleGAN3 pre-trained network.
+* `./resources/mood_mlp.pth`: The trained MLP weights for audio-to-latent mapping.
+* `./resources/scaler.pkl`: The Scikit-learn scaler for normalizing audio inputs.
 
-*Note: The Spout transmission channel is hardcoded as `GAN_Visualizer_TD`.*
+## ⚙️ Configuration
+You can tweak the system behavior by editing the **Environment Variables** section at the top of `main.py`:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `USE_GPU` | Enables CUDA acceleration. Required for real-time inference. | `True` |
+| `GAN_MODEL_PATH` | Path to the StyleGAN `.pkl` snapshot. | `./resources/gan_model.pkl` |
+| `MLP_MODEL_PATH` | Path to the MLP `.pth` weights. | `./resources/mood_mlp.pth` |
+| `SPOUT_SENDER_NAME` | The Spout sender name visible in TouchDesigner. | `"GAN_Visualizer_TD"` |
 
 ---
 
 ## ⚙️ Setup & Installation
 
-Follow these steps to configure the development environment and run the application.
-
 ### 1. Prerequisites
-* **Python 3.14** installed.
-* In progress...
+* **Python 3.12.10**
+* **NVIDIA GPU** with **CUDA 12.6** drivers installed.
+* Microsoft Visual C++ Redistributable 2022 (x64)
 
 ### 2. Automatic Configuration (Venv)
 Open your terminal in the project folder and run the following commands in sequence:
@@ -48,7 +55,8 @@ source venv/bin/activate
 ```bash
 python -m pip install -r requirements.txt
 ```
-**4. Run the application:**
+**4. Run the application.**<br>
+**IMPORTANT: Open from "x64 Native Tools Command Prompt for VS 2022**
 ```bash
 python src\main.py
 ```
@@ -65,3 +73,15 @@ To achieve smooth real-time performance and send textures to TouchDesigner, ensu
 4. Place a **Spout In TOP** node in your network.
 5. In the node parameters (top right), set the **Sender Name** to `GAN_Visualizer_TD`.
 6. Connect the output to a **Null TOP** and then to an **Out TOP** to integrate the neural visuals into your TouchDesigner pipeline.
+
+---
+
+## 📄 Usage
+
+1. From your x64 terminal (ensure the virtual environment is active), launch the App: The GUI will open showing "Waiting for audio...".
+
+2. Load Audio: Click "Open" and select a .wav file. The system will take a moment to decode the audio and pre-compute dynamic ranges.
+
+3. Audio will start playing automatically. The MLP will predict visuals based on the audio features in real-time.
+
+4. TouchDesigner: Open TouchDesigner to receive the feed.

@@ -7,17 +7,26 @@ from PyQt6.QtGui import QImage, QPixmap
 import numpy as np
 
 class GUI(QWidget):
+    """
+    Main Graphical User Interface for the Audio Visualizer.
+    
+    Handles the display of the generated GAN imagery, audio playback controls,
+    and performance metrics (FPS).
+    """
     def __init__(self, audio_manager, img_size=256):
         super().__init__()
         self.audio = audio_manager
         
-        # Flag per evitare conflitti quando l'utente trascina lo slider
+        # Flag to avoid conflicts when the user drags the slider
         self.user_is_seeking = False 
         
         self.setup_ui(img_size=img_size)
         self.connect_signals()
 
     def setup_ui(self, img_size=256):
+        """
+        Initializes the widget layout, styles, and UI components.
+        """
         self.setWindowTitle("Audio Player")
         self.setGeometry(200, 200, 500, 250)
         self.setStyleSheet("""
@@ -37,34 +46,34 @@ class GUI(QWidget):
         self.lbl_fps.setAlignment(Qt.AlignmentFlag.AlignRight)
         layout.addWidget(self.lbl_fps)
 
-        # Info file
-        self.lbl_title = QLabel("Seleziona un file audio...")
+        # File Info
+        self.lbl_title = QLabel("Select an audio file...")
         self.lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.lbl_title)
 
-        self.lbl_image = QLabel("In attesa dell'audio...")
+        self.lbl_image = QLabel("Waiting for audio...")
         self.lbl_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_image.setMinimumSize(img_size, img_size)
         layout.addWidget(self.lbl_image)
 
-        # Slider di avanzamento
+        # Progress Slider
         self.slider = QSlider(Qt.Orientation.Horizontal)
         self.slider.setRange(0, 0)
         self.slider.setEnabled(False)
         layout.addWidget(self.slider)
 
-        # Label tempo (es. 00:00 / 03:45)
+        # Time Label (e.g., 00:00 / 03:45)
         self.lbl_time = QLabel("00:00 / 00:00")
         self.lbl_time.setAlignment(Qt.AlignmentFlag.AlignRight)
         layout.addWidget(self.lbl_time)
 
-        # Controlli
+        # Controls
         controls = QHBoxLayout()
         
-        self.btn_open = QPushButton("📂 Apri")
+        self.btn_open = QPushButton("📂 Open")
         self.btn_open.clicked.connect(self.open_file_dialog)
         
-        # Icone standard di sistema per Play/Stop
+        # Standard system icons for Play/Stop
         icon_play = self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay)
         self.btn_play = QPushButton()
         self.btn_play.setIcon(icon_play)
@@ -85,40 +94,53 @@ class GUI(QWidget):
         self.setLayout(layout)
 
     def connect_signals(self):
-        # Eventi dello Slider (Utente trascina)
+        """
+        Connects UI widgets (slider, buttons) and Audio Player signals 
+        to their respective slot methods.
+        """
+        # Slider Events (User drags)
         self.slider.sliderPressed.connect(self.on_slider_pressed)
         self.slider.sliderReleased.connect(self.on_slider_released)
         self.slider.valueChanged.connect(self.on_slider_move)
 
-        # Eventi dal Player (Audio avanza)
-        # Accediamo all'oggetto QMediaPlayer dentro audio_manager
+        # Player Events (Audio advances)
+        # Accessing the QMediaPlayer object inside audio_manager
         self.audio.player.positionChanged.connect(self.update_position)
         self.audio.player.durationChanged.connect(self.update_duration)
         self.audio.player.mediaStatusChanged.connect(self.handle_media_status)
 
-    ### Logica GUI ###
+    ### GUI Logic ###
 
     def set_image(self, img_array: np.ndarray):
+        """
+        Updates the main label with a new image frame from the GAN.
+        
+        Args:
+            img_array (np.ndarray): The image data in RGB format.
+        """
         if img_array is None:
             return
         
-        # Il gan_manager restituisce un'immagine con forma (H, W, 3) e tipo uint8
+        # The gan_manager returns an image with shape (H, W, 3) and type uint8
         height, width, channels = img_array.shape
         bytes_per_line = channels * width
         
-        # Convertiamo l'array numpy in QImage (formato RGB888)
+        # Convert the numpy array to QImage (RGB888 format)
         q_img = QImage(img_array.tobytes(), width, height, bytes_per_line, QImage.Format.Format_RGB888)
         
-        # Applichiamo l'immagine alla Label
+        # Apply the image to the Label
         self.lbl_image.setPixmap(QPixmap.fromImage(q_img))
 
     def open_file_dialog(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Apri Audio", "", "Audio (*.wav)")
+        """
+        Opens a system file dialog to select a WAV file and initiates loading.
+        """
+        file_path, _ = QFileDialog.getOpenFileName(self, "Open Audio", "", "Audio (*.wav)")
         if file_path:
             self.btn_play.setEnabled(False)
             self.btn_stop.setEnabled(False)
             self.slider.setEnabled(False)
-            self.lbl_title.setText(f"Decodifica in corso: {os.path.basename(file_path)}...")
+            self.lbl_title.setText(f"Decoding in progress: {os.path.basename(file_path)}...")
 
             try:
                 self.audio.decoding_finished.disconnect()
@@ -129,11 +151,14 @@ class GUI(QWidget):
             self.audio.load_file(file_path)
 
     def on_decoding_complete(self, file_path):
-        """Slot chiamato quando l'AudioManager ha finito di processare il file."""
+        """Slot called when the AudioManager has finished processing the file."""
         self.lbl_title.setText(os.path.basename(file_path))
         self.start_audio()
 
     def start_audio(self):
+        """
+        Prepares the UI controls for playback and starts the audio.
+        """
         self.btn_play.setEnabled(True)
         self.btn_stop.setEnabled(True)
         self.slider.setEnabled(True)
@@ -141,21 +166,33 @@ class GUI(QWidget):
         self.toggle_play()
 
     def toggle_play(self):
+        """
+        Toggles between Play and Pause states and updates the button icon.
+        """
         is_playing = self.audio.play_pause()
         icon = QStyle.StandardPixmap.SP_MediaPause if is_playing else QStyle.StandardPixmap.SP_MediaPlay
         self.btn_play.setIcon(self.style().standardIcon(icon))
 
     def stop_audio(self):
+        """
+        Stops playback and resets the UI to the initial state.
+        """
         self.audio.stop()
         self.btn_play.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
         self.slider.setValue(0)
 
-    # --- Logica FPS ---
+    # --- FPS Logic ---
 
     def update_fps_label(self, actual_fps, target_fps):
-        """Aggiorna la label degli FPS con colori condizionali"""
+        """
+        Updates the FPS label with conditional colors.
         
-        # Colora di rosso se le performance calano troppo (sotto l'80% del target)
+        Args:
+            actual_fps (float): The current calculated FPS.
+            target_fps (float): The target FPS (e.g., 30 or 60).
+        """
+        
+        # Color it red if performance drops too much (below 80% of target)
         color = "#eee"
         if target_fps > 0 and actual_fps < (target_fps * 0.8):
             color = "#ff5555"
@@ -163,32 +200,40 @@ class GUI(QWidget):
         self.lbl_fps.setStyleSheet(f"color: {color}; font-size: 10pt; font-weight: bold;")
         self.lbl_fps.setText(f"FPS: {actual_fps} / {target_fps}")
 
-    # --- Logica Slider e Tempo ---
+    # --- Slider and Time Logic ---
 
     def update_duration(self, duration):
+        """Sets the maximum value of the slider based on audio duration."""
         self.slider.setMaximum(duration)
 
     def update_position(self, position):
-        # Aggiorniamo lo slider solo se l'utente NON lo sta trascinando
+        """Updates the slider position and time label as audio plays."""
+        # Update the slider only if the user is NOT dragging it
         if not self.user_is_seeking:
             self.slider.setValue(position)
         
         self.update_time_label(position, self.audio.get_duration())
 
     def on_slider_pressed(self):
+        """Called when the user clicks/holds the slider."""
         self.user_is_seeking = True
 
     def on_slider_released(self):
-        # Quando l'utente lascia lo slider, aggiorniamo la posizione audio
+        """Called when the user releases the slider."""
+        # When the user releases the slider, update the audio position
         self.audio.set_position(self.slider.value())
         self.user_is_seeking = False
 
     def on_slider_move(self):
-        # Aggiorna l'etichetta del tempo mentre trasciniamo, anche se l'audio non è ancora saltato lì
+        """Called whenever the slider value changes (used during dragging)."""
+        # Update the time label while dragging, even if audio hasn't jumped there yet
         if self.user_is_seeking:
             self.update_time_label(self.slider.value(), self.audio.get_duration())
 
     def update_time_label(self, current_ms, total_ms):
+        """
+        Formats milliseconds into MM:SS format and updates the label.
+        """
         def format_time(ms):
             seconds = (ms // 1000) % 60
             minutes = (ms // 60000)
@@ -197,5 +242,8 @@ class GUI(QWidget):
         self.lbl_time.setText(f"{format_time(current_ms)} / {format_time(total_ms)}")
 
     def handle_media_status(self, status):
+        """
+        Handles media status changes (e.g., stopping when the file ends).
+        """
         if status == QMediaPlayer.MediaStatus.EndOfMedia:
             self.stop_audio()

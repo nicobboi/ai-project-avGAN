@@ -6,6 +6,12 @@ import os
 import utils.logutils as log
 
 class MoodLatentMLP(nn.Module):
+    """
+    Simple Feed-Forward Neural Network (MLP).
+    
+    It maps low-level audio features (Input) to the GAN's Latent Space (Output).
+    Structure: Input -> [Linear->ReLU->BatchNorm] x 2 -> Linear->ReLU -> Output
+    """
     def __init__(self, input_size=5, output_size=512):
         super(MoodLatentMLP, self).__init__()
         
@@ -28,75 +34,81 @@ class MoodLatentMLP(nn.Module):
         return self.network(x)
 
 class MoodPredictor:
+    """
+    Wrapper class to handle Model loading, Input Scaling, and Inference.
+    """
     def __init__(self, model_path, scaler_path, use_gpu=True):
         """
-        Inizializza il predittore caricando modello e scaler.
+        Initializes the predictor by loading the model and the scaler.
         """
 
         if use_gpu and torch.cuda.is_available():
             self.device = torch.device('cuda')
-            log.info("MLP Manager: Modalità GPU (CUDA) attivata.")
+            log.info("MLP Manager: GPU mode (CUDA) activated.")
         else:
             self.device = torch.device('cpu')
             if use_gpu and not torch.cuda.is_available():
-                log.warning("MLP Manager: GPU richiesta ma non trovata. Fallback su CPU.")
+                log.warning("MLP Manager: GPU requested but not found. Fallback to CPU.")
             else:
-                log.info("MLP Manager: Modalità CPU forzata.")
+                log.info("MLP Manager: CPU mode forced.")
 
         self.model_loaded = False
         
-        # Controllo esistenza file
+        # Check if files exist
         if not os.path.exists(model_path) or not os.path.exists(scaler_path):
-            log.error(f"ERRORE: File modello o scaler non trovati:\nModello: {model_path}\nScaler: {scaler_path}")
+            log.error(f"ERROR: Model or scaler files not found:\nModel: {model_path}\nScaler: {scaler_path}")
             return
 
         try:
-            # Caricamento Scaler
+            # Load Scaler
             self.scaler = joblib.load(scaler_path)
             
-            # Caricamento Modello
+            # Load Model
             self.model = MoodLatentMLP(input_size=5, output_size=512)
             self.model.load_state_dict(torch.load(model_path, map_location=self.device))
             self.model.to(self.device)
             self.model.eval()
             
             self.model_loaded = True
-            log.success(f"MoodPredictor inizializzato su {self.device}.")
+            log.success(f"MLP model 'MoodPredictor' initialized on {self.device}.")
             
         except Exception as e:
-            log.error(f"ERRORE durante il caricamento del modello: {e}")
+            log.error(f"ERROR loading the model: {e}")
             self.model_loaded = False
 
     def get_latent_vector(self, contrast: float, flatness: float, onset: float, zrc: float, chroma_var: float):
         """
-        Prende le feature audio grezze, le normalizza e restituisce il vettore latente.
+        Takes raw audio features, normalizes them, and returns the latent vector.
         
-        Input: 5 float
-        Output: Numpy array (512,) float32
+        Args:
+            contrast, flatness, onset, zrc, chroma_var (float): Extracted audio features.
+
+        Returns:
+            np.array: A 512-dimensional vector (float32).
         """
         if not self.model_loaded:
-            # Ritorna vettore vuoto o zeri in caso di errore
+            # Return empty vector or zeros in case of error
             return np.zeros(512, dtype=np.float32)
 
-        # Preparazione Input (shape [1, 4])
-        # L'input deve essere un array 2D per lo scaler e per PyTorch
+        # Input Preparation (shape [1, 5])
+        # Input must be a 2D array for the scaler and PyTorch
         raw_input = np.array([[contrast, flatness, onset, zrc, chroma_var]], dtype=np.float32)
 
-        # Normalizzazione (Usando lo scaler appreso nel training)
+        # Normalization (Using the scaler learned during training)
         try:
             scaled_input = self.scaler.transform(raw_input)
         except Exception as e:
-            log.error(f"Errore nello scaling: {e}")
+            log.error(f"Scaling error: {e}")
             return np.zeros(512, dtype=np.float32)
 
-        # Conversione in Tensore
+        # Conversion to Tensor
         input_tensor = torch.tensor(scaled_input, dtype=torch.float32).to(self.device)
 
-        # Inferenza
+        # Inference
         with torch.no_grad():
             output_tensor = self.model(input_tensor)
 
-        # Conversione Output in Numpy
+        # Output Conversion to Numpy
         latent_vector = output_tensor.cpu().numpy().flatten()
 
         return latent_vector
